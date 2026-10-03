@@ -12,7 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install build and UI test dependencies
         run: |
           sudo apt-get update
@@ -22,6 +24,9 @@ jobs:
       - name: Run unit and security regression tests
         run: make test
       - name: Run UI tests in a virtual display
+        env:
+          # The headless runner has no desktop accessibility bus.
+          NO_AT_BRIDGE: "1"
         run: xvfb-run -a make ui-test
       - name: Check installer syntax
         run: bash -n install.sh
