@@ -127,9 +127,9 @@ librsvg 2.62.4. This is an inventory, not a dependency-CVE clearance.
   A failure is reported without recursive deletion of the original profile.
 - Native browser executables and `du` are resolved through the user's PATH;
   the desktop environment and executable search path must be trusted.
-- Firefox, Chrome and Tor received live integration tests. A real Flatpak
+- Firefox, Chrome, Tor, Firefox Snap and Chromium Snap received live integration tests. A real Flatpak
   namespace was tested using an inert command in an existing runtime. Individual
-  packaged browser builds, LibreWolf, Snap, other desktops, network filesystems and
+  Flatpak browser builds, LibreWolf, Brave Snap, other desktops, network filesystems and
   dependency CVE status were not comprehensively tested in this review.
 
 ## Follow-up: reconnecting browser sessions
@@ -210,5 +210,10 @@ Evidence: tests/adapters_test.c covers arguments, discovery, storage, profile
 compatibility, Tor daemon locking and sandbox marker ownership. The live package
 integration check ran two Tor 15.0.22 browser/daemon pairs and a real Flatpak PID
 namespace. It covers reconnect/Stop, active protection, stale-marker recovery,
-reset and purge. No Snap browser is installed here; real Snap and individual
-Flatpak browser builds remain distribution-testing work.
+reset and purge. tests/snap_integration_test.c ran two Firefox Snap 157.0-1 and
+two Chromium Snap 154.0.8037.57 profiles concurrently. Reconnect/Stop, active
+reset/purge refusal, sentinel preservation through recovery and fixture cleanup
+passed. The existing ~/.isotab tree had zero inode/size/mtime differences before
+and after that run. The Arch/EndeavourOS kernel had AppArmor disabled, so full
+AppArmor confinement remains unverified. Brave Snap and individual Flatpak
+browser builds remain distribution-testing work.

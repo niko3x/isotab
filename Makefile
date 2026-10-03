@@ -73,3 +73,11 @@ package-integration-test: isotab-resources.c
 	"$$test_bin"
 
 .PHONY: package-integration-test
+
+snap-integration-test: isotab-resources.c
+	@set -e; test_bin=$$(mktemp /tmp/isotab-snap-integration.XXXXXX); \
+	trap 'rm -f "$$test_bin"' EXIT; \
+	$(CC) $(CFLAGS) -Werror -o "$$test_bin" tests/snap_integration_test.c isotab-resources.c $(LDFLAGS); \
+	"$$test_bin"
+
+.PHONY: snap-integration-test

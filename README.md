@@ -203,9 +203,16 @@ Set `ISOTAB_TEST_FLATPAK_APP` to an installed application ID to additionally run
 an inert test shell inside its existing runtime. That check verifies real PID
 namespace translation, the profile filesystem grant, active-profile protection
 and stale-marker recovery; it does not launch the application's normal UI.
-Tor 15.0.22 and a real Flatpak namespace have been exercised here. Individual
-Flatpak browser builds, LibreWolf and Snap browsers still need distribution
-testing; the local machine has no Snap installation.
+`make snap-integration-test` launches two profiles for each installed supported
+Snap browser using fresh UUIDs in its common data directory. It checks concurrent
+profiles, reconnect/Stop, active reset/purge refusal, recovery preservation and
+cleanup without loading or saving the real session list.
+
+Tor 15.0.22, a real Flatpak namespace, Firefox Snap 157.0-1 and Chromium Snap
+154.0.8037.57 have been exercised here. The Snap run used Arch/EndeavourOS with
+AppArmor disabled, so it does not establish full AppArmor confinement coverage.
+Individual Flatpak browser builds, LibreWolf and Brave Snap still need
+distribution testing.
 
 Packaging references:
 
