@@ -16,14 +16,14 @@ all: $(TARGET)
 test: isotab-resources.c
 	@set -e; test_bin=$$(mktemp /tmp/isotab-test.XXXXXX); \
 	trap 'rm -f "$$test_bin"' EXIT; \
-	for test_source in tests/profile_test.c tests/sessions_test.c tests/security_test.c tests/reset_test.c tests/lock_race_test.c tests/recovery_test.c; do \
+	for test_source in tests/profile_test.c tests/sessions_test.c tests/security_test.c tests/reset_test.c tests/lock_race_test.c tests/recovery_test.c tests/adapters_test.c; do \
 	$(CC) $(CFLAGS) -Werror -o "$$test_bin" "$$test_source" isotab-resources.c $(LDFLAGS); \
 	"$$test_bin"; done
 
 isotab-resources.c: isotab.gresource.xml isotab.svg
 	glib-compile-resources --generate-source --c-name isotab --target=$@ isotab.gresource.xml
 
-$(TARGET): browser.c browsers.h safe-files.h profile-reset.h profile-import.h profile-purge.h isotab-resources.c
+$(TARGET): browser.c browsers.h safe-files.h tor-profile.h profile-reset.h profile-import.h profile-purge.h sandbox-process.h isotab-resources.c
 	@echo "  CC  browser.c"
 	@$(CC) $(CFLAGS) -o $(TARGET) browser.c isotab-resources.c $(LDFLAGS)
 	@echo "  > ./$(TARGET) built OK"
@@ -65,3 +65,11 @@ ui-test: isotab-resources.c
 	G_DEBUG=fatal-warnings "$$test_bin"; done
 
 .PHONY: ui-test
+
+package-integration-test: isotab-resources.c
+	@set -e; test_bin=$$(mktemp /tmp/isotab-package-integration.XXXXXX); \
+	trap 'rm -f "$$test_bin"' EXIT; \
+	$(CC) $(CFLAGS) -Werror -o "$$test_bin" tests/package_integration_test.c isotab-resources.c $(LDFLAGS); \
+	"$$test_bin"
+
+.PHONY: package-integration-test

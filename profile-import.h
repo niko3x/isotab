@@ -4,7 +4,7 @@
 #ifndef ISOTAB_PROFILE_IMPORT_H
 #define ISOTAB_PROFILE_IMPORT_H
 
-enum { PROFILE_UNKNOWN, PROFILE_FIREFOX, PROFILE_CHROMIUM, PROFILE_MIXED };
+enum { PROFILE_UNKNOWN, PROFILE_FIREFOX, PROFILE_CHROMIUM, PROFILE_MIXED, PROFILE_TOR };
 
 static gboolean profile_marker_at(int root, const char *name, mode_t type)
 {
@@ -22,7 +22,8 @@ static int profile_family_at(int root)
     gboolean chromium = profile_marker_at(root, "Local State", S_IFREG) ||
         profile_marker_at(root, "Default", S_IFDIR) ||
         profile_marker_at(root, "SingletonLock", S_IFLNK);
-    return firefox && chromium ? PROFILE_MIXED : firefox ? PROFILE_FIREFOX :
+    gboolean tor = profile_tag_at(root, ".isotab-tor");
+    return (firefox || tor) && chromium ? PROFILE_MIXED : tor ? PROFILE_TOR : firefox ? PROFILE_FIREFOX :
         chromium ? PROFILE_CHROMIUM : PROFILE_UNKNOWN;
 }
 
@@ -35,17 +36,20 @@ static gboolean validate_import_profile(const char *path, Browser *browser, GErr
     int root = open_profile_directory(path, error);
     if (root < 0) return FALSE;
     int family = profile_family_at(root);
-    close(root);
     if (family == PROFILE_MIXED ||
+        (family == PROFILE_TOR && !browser_is_tor(browser)) ||
+        (browser_is_tor(browser) && family != PROFILE_TOR && family != PROFILE_UNKNOWN) ||
         (family == PROFILE_FIREFOX && browser->family != FAMILY_FIREFOX) ||
         (family == PROFILE_CHROMIUM && browser->family != FAMILY_CHROMIUM)) {
         g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_INVAL,
             family == PROFILE_MIXED ?
             "This folder contains both Firefox and Chromium data. Resolve the mixed profile before importing; its files were not changed." :
             "This folder contains %s data and cannot be imported as %s. Choose its original browser.",
-            family == PROFILE_FIREFOX ? "Firefox" : "Chromium", browser->name);
+            family == PROFILE_TOR ? "Tor Browser" : family == PROFILE_FIREFOX ? "Firefox" : "Chromium", browser->name);
+        close(root);
         return FALSE;
     }
-    return TRUE;
+    gboolean ok = mark_imported_package_profile(root, browser, error);
+    close(root); return ok;
 }
 #endif

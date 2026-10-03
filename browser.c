@@ -19,6 +19,8 @@
 #include <sys/syscall.h>
 #include "browsers.h"
 #include "safe-files.h"
+#include "tor-profile.h"
+#include "sandbox-process.h"
 
 /* ─── constants ──────────────────────────────────────── */
 #define APP_TITLE     "IsoTab - Browser Sessions"
@@ -188,7 +190,15 @@ static int lock_profile_at(int dirfd, GError **error)
             }
             g_free(target);
         }
-        if (safe) return fd;
+        if (safe) {
+            int tor_guard = tor_data_guard_at(dirfd, error);
+            if (tor_guard != -1) {
+                if (tor_guard >= 0) close(tor_guard);
+                return fd;
+            }
+            close(fd);
+            return -1;
+        }
         if (result == 0) saved_errno = EBUSY;
     } else {
         saved_errno = errno;
@@ -253,14 +263,15 @@ static double profile_size_mb(const char *dir)
 
 /* Validate every marker snapshot, including the one displaced by exchange.
  * Only a fully parsed local native marker or our local reservation may be stale. */
-static gboolean chromium_marker_stale(const char *marker)
+static gboolean chromium_marker_stale(const char *marker, int root)
 {
     if (!marker) return FALSE;
     const char *dash = strrchr(marker, '-');
     if (!dash || !g_ascii_isdigit(dash[1])) return FALSE;
     char *host = g_strndup(marker, dash - marker);
     char *reservation = g_strdup_printf("%s.isotab-clear", g_get_host_name());
-    gboolean local = !strcmp(host, g_get_host_name()) || !strcmp(host, reservation);
+    gboolean reserved = !strcmp(host, reservation);
+    gboolean local = !strcmp(host, g_get_host_name()) || reserved;
     g_free(host); g_free(reservation);
     const char *digit = dash + 1;
     while (g_ascii_isdigit(*digit)) digit++;
@@ -269,7 +280,17 @@ static gboolean chromium_marker_stale(const char *marker)
     errno = 0;
     guint64 owner = g_ascii_strtoull(dash + 1, &end, 10);
     if (errno || *end || owner == 0 || owner > INT_MAX) return FALSE;
-    return kill((pid_t)owner, 0) == -1 && errno == ESRCH;
+    if (!reserved && profile_tag_at(root, ".isotab-sandbox")) {
+        gboolean uncertain = FALSE;
+        return !sandbox_profile_owner(root, owner, &uncertain) && !uncertain;
+    }
+    gboolean dead = kill((pid_t)owner, 0) == -1 && errno == ESRCH;
+    if (dead && !reserved) {
+        /* An imported/uninitialized folder may predate our namespace tag. */
+        gboolean uncertain = FALSE;
+        dead = !sandbox_profile_owner(root, owner, &uncertain) && !uncertain;
+    }
+    return dead;
 }
 
 static gboolean chromium_available_at(int dirfd, GError **error)
@@ -281,7 +302,7 @@ static gboolean chromium_available_at(int dirfd, GError **error)
         goto failed;
     }
     char *target = read_link_at(dirfd, "SingletonLock");
-    gboolean stale = chromium_marker_stale(target);
+    gboolean stale = chromium_marker_stale(target, dirfd);
     g_free(target);
     if (stale) return TRUE;
     errno = EBUSY;
@@ -372,14 +393,17 @@ static Session *new_session(const char *id, const char *name, Browser *browser)
     s->browser = browser;
     if (g_str_has_prefix(id, "legacy_"))
         s->profile_dir = g_strdup_printf("%s/session_%s", data_dir, id + 7);
-    else
-        s->profile_dir = g_build_filename(data_dir, "profiles", id, NULL);
+    else {
+        char *root = browser_profile_root(browser, data_dir);
+        s->profile_dir = g_build_filename(root, id, NULL);
+        g_free(root);
+    }
     return s;
 }
 
 static char *recovery_data_path(Session *s)
 {
-    char *trash = recovery_trash_path(s->id);
+    char *trash = recovery_trash_path_for_profile(s->profile_dir, s->id);
     if (s->deletion_started && !path_missing(trash)) return trash;
     g_free(trash);
     return g_strdup(s->profile_dir);
@@ -389,6 +413,7 @@ static gboolean save_sessions(GError **error)
 {
     GKeyFile *file = g_key_file_new();
     g_key_file_set_integer(file, "IsoTab", "version", 1);
+    g_key_file_set_string(file, "IsoTab", "tor_browser_directory", tor_browser_directory ? tor_browser_directory : "");
     g_key_file_set_boolean(file, "IsoTab", "show_sizes", preferences.show_sizes);
     g_key_file_set_boolean(file, "IsoTab", "shortcuts", preferences.shortcuts);
     g_key_file_set_string(file, "IsoTab", "default_browser",
@@ -427,6 +452,7 @@ static gboolean valid_session_id(const char *id)
 
 static gboolean load_sessions(GError **error)
 {
+    g_clear_pointer(&tor_browser_directory, g_free);
     g_clear_pointer(&preferences.default_browser, g_free);
     preferences.show_sizes = TRUE;
     preferences.shortcuts = TRUE;
@@ -489,6 +515,10 @@ static gboolean load_sessions(GError **error)
         return save_sessions(error);
     }
     if (g_key_file_get_integer(file, "IsoTab", "version", NULL) != 1) goto invalid;
+    g_clear_pointer(&tor_browser_directory, g_free);
+    tor_browser_directory = g_key_file_get_string(file, "IsoTab", "tor_browser_directory", NULL);
+    if (tor_browser_directory && *tor_browser_directory &&
+        (!g_path_is_absolute(tor_browser_directory) || !g_utf8_validate(tor_browser_directory, -1, NULL))) goto invalid;
     if (g_key_file_has_key(file, "IsoTab", "show_sizes", NULL))
         preferences.show_sizes = g_key_file_get_boolean(file, "IsoTab", "show_sizes", NULL);
     if (g_key_file_has_key(file, "IsoTab", "shortcuts", NULL))
@@ -506,7 +536,8 @@ static gboolean load_sessions(GError **error)
         Browser *browser = find_browser(browser_id);
         if (!valid_session_id(groups[i]) || !name || !*name ||
             !g_utf8_validate(name, -1, NULL) || !browser ||
-            (g_str_has_prefix(groups[i], "legacy_") && browser->family != FAMILY_FIREFOX)) {
+            (g_str_has_prefix(groups[i], "legacy_") &&
+                (browser->family != FAMILY_FIREFOX || browser->package == PACKAGE_SNAP || browser_is_tor(browser)))) {
             valid = FALSE;
         } else {
             Session *s = new_session(groups[i], name, browser);
@@ -560,6 +591,10 @@ static pid_t profile_owner(Session *s)
             guint64 candidate = g_ascii_strtoull(dash + 1, &end, 10);
             if (!strcmp(target, g_get_host_name()) && !*end && candidate > 0 && candidate <= INT_MAX)
                 pid = (pid_t)candidate;
+            if (pid && profile_tag_at(root, ".isotab-sandbox")) {
+                gboolean uncertain = FALSE;
+                pid = sandbox_profile_owner(root, pid, &uncertain);
+            }
         }
         g_free(target);
     }
@@ -578,7 +613,8 @@ static gboolean process_matches_session(Session *s, pid_t pid)
     g_free(path);
     char *base = exe ? g_path_get_basename(exe) : NULL;
     gboolean browser = s->browser->family == FAMILY_FIREFOX ?
-        (!g_strcmp0(base, "firefox") || !g_strcmp0(base, "firefox-bin") || !g_strcmp0(base, "firefox-esr")) :
+        (!g_strcmp0(base, "firefox") || !g_strcmp0(base, "firefox-bin") || !g_strcmp0(base, "firefox-esr") ||
+         !g_strcmp0(base, "firefox.real") || !g_strcmp0(base, "librewolf") || !g_strcmp0(base, "librewolf-bin")) :
         (!g_strcmp0(base, "chrome") || !g_strcmp0(base, "chromium") ||
          !g_strcmp0(base, "brave") || !g_strcmp0(base, "brave-browser") ||
          !g_strcmp0(base, "msedge") || !g_strcmp0(base, "vivaldi") || !g_strcmp0(base, "vivaldi-bin"));
@@ -649,7 +685,8 @@ static gboolean stop_recovered_session(Session *s, GError **error)
     gboolean ok = profile_owner(s) == pid && process_matches_session(s, pid);
     if (ok) ok = syscall(SYS_pidfd_send_signal, fd, SIGTERM, NULL, 0) == 0;
     close(fd);
-    if (!ok) g_set_error_literal(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+    if (ok && browser_is_tor(s->browser)) ok = stop_tor_daemons(s->browser, s->profile_dir, error);
+    if (!ok && error && !*error) g_set_error_literal(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
         "The browser process changed or exited. Refresh the session and try again.");
     return ok;
 }
@@ -788,8 +825,13 @@ static void cb_launch(GtkButton *btn, gpointer data)
 
     /* stop if already running */
     if (s->running) {
-        if (s->pid > 0 && kill(s->pid, SIGTERM) != 0)
-            show_error(g_strerror(errno));
+        pid_t owner = recovered_session_pid(s);
+        if (owner) {
+            s->external_pid = owner;
+            GError *error = NULL;
+            if (!stop_recovered_session(s, &error)) { show_error(error->message); g_error_free(error); }
+            s->external_pid = 0;
+        } else if (s->pid > 0 && kill(s->pid, SIGTERM) != 0) show_error(g_strerror(errno));
         return;
     }
 
@@ -813,9 +855,7 @@ static void cb_launch(GtkButton *btn, gpointer data)
     /* ensure profile directory exists */
     GError *lock_error = NULL;
     if (!g_str_has_prefix(s->id, "legacy_")) {
-        char *profiles = g_build_filename(data_dir, "profiles", NULL);
-        int parent_fd = ensure_profile_directory(profiles, &lock_error);
-        g_free(profiles);
+        int parent_fd = ensure_browser_profile_root(s->browser, data_dir, &lock_error);
         if (parent_fd < 0) {
             show_error(lock_error->message); g_error_free(lock_error);
             return;
@@ -832,9 +872,11 @@ static void cb_launch(GtkButton *btn, gpointer data)
     if (s->browser->family == FAMILY_FIREFOX) {
         int fd = lock_profile(s->profile_dir, &lock_error);
         available = fd >= 0;
+        if (available) available = prepare_browser_profile(s->browser, s->profile_dir, &lock_error);
         if (fd >= 0) close(fd);
     } else {
         available = prepare_chromium_launch(s->profile_dir, &lock_error);
+        if (available) available = prepare_browser_profile(s->browser, s->profile_dir, &lock_error);
     }
     if (!available) {
         show_error(lock_error->message);
@@ -843,14 +885,17 @@ static void cb_launch(GtkButton *btn, gpointer data)
         return;
     }
     char **argv = browser_arguments(s->browser, s->profile_dir);
+    char **environment = browser_environment(s->browser);
+    char *cwd = s->browser->package == PACKAGE_TOR ? g_path_get_dirname(s->browser->executable) : NULL;
 
     GError *err = NULL;
     gboolean ok = g_spawn_async(
-        NULL, argv, NULL,
+        cwd, argv, environment,
         G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
         NULL, NULL, &s->pid, &err);
 
     g_strfreev(argv);
+    g_strfreev(environment); g_free(cwd);
     if (ok) {
         s->running = TRUE;
         g_child_watch_add(s->pid, cb_child_exit, s);
@@ -1191,6 +1236,38 @@ static GtkWidget *create_card(Session *s)
     return frame;
 }
 
+typedef struct { GtkWidget *dialog, *combo, *label; guint source; } AddChoices;
+
+static void populate_add_choices(AddChoices *choices)
+{
+    char *selected = g_strdup(gtk_combo_box_get_active_id(GTK_COMBO_BOX(choices->combo)));
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(choices->combo));
+    int count = 0;
+    for (guint i = 0; i < G_N_ELEMENTS(browsers); i++) {
+        if (!browsers[i].executable) continue;
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(choices->combo), browsers[i].id, browsers[i].name);
+        count++;
+    }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(choices->combo), 0);
+    if (selected) gtk_combo_box_set_active_id(GTK_COMBO_BOX(choices->combo), selected);
+    else if (preferences.default_browser && find_browser(preferences.default_browser)->executable)
+        gtk_combo_box_set_active_id(GTK_COMBO_BOX(choices->combo), preferences.default_browser);
+    g_free(selected);
+    gtk_label_set_text(GTK_LABEL(choices->label), count ? "Browser" : flatpak_scan_pending ?
+        "Looking for installed browsers..." : "No supported browser found. Install a supported browser and try again.");
+    gtk_dialog_set_response_sensitive(GTK_DIALOG(choices->dialog), GTK_RESPONSE_OK, count > 0);
+}
+
+static gboolean add_discovery_done(gpointer data)
+{
+    AddChoices *choices = data;
+    if (flatpak_scan_pending) return G_SOURCE_CONTINUE;
+    detect_browsers();
+    populate_add_choices(choices);
+    choices->source = 0;
+    return G_SOURCE_REMOVE;
+}
+
 static void cb_add_session(GtkButton *button, gpointer data)
 {
     (void)button; (void)data;
@@ -1203,28 +1280,25 @@ static void cb_add_session(GtkButton *button, gpointer data)
     gtk_container_set_border_width(GTK_CONTAINER(box), 12);
     gtk_box_set_spacing(GTK_BOX(box), 8);
     GtkWidget *combo = gtk_combo_box_text_new();
-    int count = 0;
-    for (guint i = 0; i < G_N_ELEMENTS(browsers); i++) {
-        if (!browsers[i].executable) continue;
-        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), browsers[i].id, browsers[i].name);
-        count++;
-    }
-    gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
-    if (preferences.default_browser && find_browser(preferences.default_browser)->executable)
-        gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo), preferences.default_browser);
+    GtkWidget *browser_label = gtk_label_new(NULL);
+    AddChoices choices = {dialog, combo, browser_label, 0};
+    populate_add_choices(&choices);
+    if (flatpak_scan_pending) choices.source = g_timeout_add(100, add_discovery_done, &choices);
     GtkWidget *name = gtk_entry_new();
     gtk_entry_set_max_length(GTK_ENTRY(name), 80);
     gtk_entry_set_placeholder_text(GTK_ENTRY(name), "Session name (optional)");
     gtk_entry_set_activates_default(GTK_ENTRY(name), TRUE);
     gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
-    gtk_box_pack_start(GTK_BOX(box), gtk_label_new(count ? "Browser" :
-        "No supported browser found. Install Firefox, Chromium, Chrome or Brave."), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), browser_label, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), combo, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), name, FALSE, FALSE, 0);
-    gtk_dialog_set_response_sensitive(GTK_DIALOG(dialog), GTK_RESPONSE_OK, count > 0);
     gtk_widget_show_all(dialog);
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
         Browser *browser = find_browser(gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo)));
+        if (!browser) {
+            if (choices.source) g_source_remove(choices.source);
+            show_error("Choose an installed browser first."); gtk_widget_destroy(dialog); return;
+        }
         char *label = g_strdup(gtk_entry_get_text(GTK_ENTRY(name)));
         g_strstrip(label);
         char *id = g_uuid_string_random();
@@ -1244,6 +1318,7 @@ static void cb_add_session(GtkButton *button, gpointer data)
         g_free(id);
         g_free(label);
     }
+    if (choices.source) g_source_remove(choices.source);
     gtk_widget_destroy(dialog);
 }
 
@@ -1282,7 +1357,7 @@ static void open_data_folder(GtkButton *button, gpointer data)
 
 static gboolean recovery_files_missing(Session *s)
 {
-    char *trash = recovery_trash_path(s->id);
+    char *trash = recovery_trash_path_for_profile(s->profile_dir, s->id);
     gboolean missing = path_missing(s->profile_dir) && path_missing(trash);
     g_free(trash); return missing;
 }
@@ -1459,12 +1534,16 @@ static gboolean known_session_id(const char *id)
     return FALSE;
 }
 
-static void offer_import(GtkComboBoxText *combo, const char *id)
+static void offer_import(GtkComboBoxText *combo, const char *id, Browser *storage_browser)
 {
     if (!valid_session_id(id) || known_session_id(id)) return;
-    Session *probe = new_session(id, id, find_browser("firefox"));
+    Session *probe = new_session(id, id, storage_browser);
     int root = open_profile_directory(probe->profile_dir, NULL);
-    if (root >= 0) { gtk_combo_box_text_append(combo, id, probe->profile_dir); close(root); }
+    if (root >= 0) {
+        char *choice = storage_browser->package == PACKAGE_SNAP ? g_strdup_printf("%s@%s", id, storage_browser->id) : g_strdup(id);
+        gtk_combo_box_text_append(combo, choice, probe->profile_dir);
+        g_free(choice); close(root);
+    }
     session_free(probe);
 }
 
@@ -1492,13 +1571,21 @@ static void cb_import(GtkButton *button, gpointer data)
     GDir *directory = g_dir_open(parent, 0, NULL);
     const char *entry;
     if (directory) {
-        while ((entry = g_dir_read_name(directory))) offer_import(GTK_COMBO_BOX_TEXT(profiles), entry);
+        while ((entry = g_dir_read_name(directory))) offer_import(GTK_COMBO_BOX_TEXT(profiles), entry, find_browser("firefox"));
         g_dir_close(directory);
     }
     g_free(parent);
+    for (guint i = 0; i < G_N_ELEMENTS(browsers); i++) {
+        if (browsers[i].package != PACKAGE_SNAP) continue;
+        parent = browser_profile_root(&browsers[i], data_dir);
+        directory = g_dir_open(parent, 0, NULL);
+        while (directory && (entry = g_dir_read_name(directory))) offer_import(GTK_COMBO_BOX_TEXT(profiles), entry, &browsers[i]);
+        if (directory) g_dir_close(directory);
+        g_free(parent);
+    }
     for (int i = 0; i < 10; i++) {
         char *id = g_strdup_printf("legacy_%d", i);
-        offer_import(GTK_COMBO_BOX_TEXT(profiles), id);
+        offer_import(GTK_COMBO_BOX_TEXT(profiles), id, find_browser("firefox"));
         g_free(id);
     }
     gtk_combo_box_set_active(GTK_COMBO_BOX(profiles), 0);
@@ -1521,12 +1608,18 @@ static void cb_import(GtkButton *button, gpointer data)
     g_signal_connect(browser, "changed", G_CALLBACK(import_selection_changed), dialog);
     gtk_widget_show_all(dialog);
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        const char *id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(profiles));
+        const char *choice = gtk_combo_box_get_active_id(GTK_COMBO_BOX(profiles));
+        if (!choice) { show_error("Choose a profile folder before importing."); gtk_widget_destroy(dialog); return; }
+        char **location = g_strsplit(choice ? choice : "", "@", 2);
+        const char *id = location[0];
+        Browser *storage = location[1] ? find_browser(location[1]) : NULL;
         Browser *b = find_browser(gtk_combo_box_get_active_id(GTK_COMBO_BOX(browser)));
         if (!b) {
             show_error("Choose the original browser before importing this profile.");
-        } else if (g_str_has_prefix(id, "legacy_") && b->family != FAMILY_FIREFOX) {
-            show_error("Legacy session_N folders require a Firefox-family browser.");
+        } else if ((storage && b != storage) || (!storage && b->package == PACKAGE_SNAP)) {
+            show_error("Snap profiles must keep their original Snap browser and storage location.");
+        } else if (g_str_has_prefix(id, "legacy_") && (b->family != FAMILY_FIREFOX || browser_is_tor(b))) {
+            show_error("Legacy session_N folders require a Firefox-family browser other than Tor Browser.");
         } else if (!known_session_id(id)) {
             char *label = g_strdup(gtk_entry_get_text(GTK_ENTRY(name)));
             g_strstrip(label);
@@ -1548,8 +1641,15 @@ static void cb_import(GtkButton *button, gpointer data)
                 }
             }
         }
+        g_strfreev(location);
     }
     gtk_widget_destroy(dialog);
+}
+
+static void tor_automatic_clicked(GtkButton *button, gpointer chooser)
+{
+    (void)button;
+    gtk_file_chooser_unselect_all(GTK_FILE_CHOOSER(chooser));
 }
 
 static void cb_settings(GtkButton *button, gpointer data)
@@ -1587,6 +1687,14 @@ static void cb_settings(GtkButton *button, gpointer data)
     GtkWidget *shortcuts = gtk_check_button_new_with_label("Enable Alt+1 through Alt+0 quick launch");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(shortcuts), preferences.shortcuts);
     gtk_box_pack_start(GTK_BOX(general), shortcuts, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(general), settings_text("Tor Browser installation (version 15 or newer)", FALSE), FALSE, FALSE, 0);
+    GtkWidget *tor_folder = gtk_file_chooser_button_new("Select Tor Browser installation", GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
+    if (tor_browser_directory && *tor_browser_directory) gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(tor_folder), tor_browser_directory);
+    gtk_box_pack_start(GTK_BOX(general), tor_folder, FALSE, FALSE, 0);
+    GtkWidget *tor_auto = gtk_button_new_with_label("Use automatic Tor Browser detection");
+    g_signal_connect(tor_auto, "clicked", G_CALLBACK(tor_automatic_clicked), tor_folder);
+    gtk_box_pack_start(GTK_BOX(general), tor_auto, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(general), settings_text("Leave the folder unset to detect a bundle installed by Tor Browser Launcher or in your home folder.", FALSE), FALSE, FALSE, 0);
 
     GtkWidget *storage = settings_page(notebook, "Storage");
     char *description = g_strdup_printf(
@@ -1598,7 +1706,7 @@ static void cb_settings(GtkButton *button, gpointer data)
     g_signal_connect(open, "clicked", G_CALLBACK(open_data_folder), dialog);
     gtk_box_pack_start(GTK_BOX(storage), open, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(storage), settings_text(
-        "Close your browsers before backing up this folder. Existing Firefox profiles stay in their original session_N folders.", FALSE), FALSE, FALSE, 0);
+        "Close your browsers before backups. Existing Firefox profiles keep their session_N folders. Snap profiles live under ~/snap/<browser>/common/isotab/profiles and must be backed up separately.", FALSE), FALSE, FALSE, 0);
     for (guint i = 0; i < sessions->len; i++) {
         Session *s = g_ptr_array_index(sessions, i);
         char *line = g_strdup_printf("%s (%s)\n%s", s->name, s->browser->name, s->profile_dir);
@@ -1646,12 +1754,22 @@ static void cb_settings(GtkButton *button, gpointer data)
         "Clear starts fresh and keeps the original profile in Recovery. Remove moves the session to Recovery. Both ask for confirmation and retain disk usage. Rename changes its label.\n\n"
         "Close a session's browser before clearing or removing it. Closing IsoTab leaves browser windows open; reopening reconnects verified browser sessions and restores Stop.\n\n"
         "Alt+1 through Alt+0 launch the first ten sessions when enabled. Ctrl+Q closes IsoTab.\n\n"
-        "Supported browsers: Firefox, Firefox ESR, Chromium, Chrome, Brave, Edge and Vivaldi. Install a native browser in PATH and it will be detected automatically. Tor, LibreWolf, Flatpak and Snap adapters are not included.\n\n"
+        "Supported browsers: Firefox, Firefox ESR, LibreWolf, Tor Browser, Chromium, Chrome, Brave, Edge and Vivaldi. Native and installed Flatpak variants are detected. Snap variants of Firefox, Chromium and Brave use Snap's common data folder. Packaging choices are separate so each session keeps its original browser.\n\n"
+        "Tor Browser sessions use the installed bundle, separate Tor data and automatically assigned SOCKS ports. Its normal Tor connection screen appears on first launch. IsoTab manages Tor path preferences in user.js; custom lines after its marked block are preserved.\n\n"
         "Separate profiles keep browser data apart. They do not change your IP address or add another operating-system sandbox.", FALSE), FALSE, FALSE, 0);
     gtk_widget_show_all(dialog);
     int response;
     do { response = gtk_dialog_run(GTK_DIALOG(dialog)); } while (pending_operations);
     if (response == GTK_RESPONSE_ACCEPT) {
+        char *folder = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(tor_folder));
+        char *exe = folder ? tor_bundle_executable(folder) : NULL;
+        if (folder && !exe) {
+            show_error("Select a Tor Browser 15 or newer installation containing its Browser folder, or use automatic detection.");
+            g_free(folder); gtk_widget_destroy(dialog); return;
+        }
+        g_free(exe);
+        char *previous_tor_directory = tor_browser_directory;
+        tor_browser_directory = folder;
         Preferences old = preferences;
         preferences.show_sizes = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(sizes));
         preferences.shortcuts = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(shortcuts));
@@ -1659,11 +1777,14 @@ static void cb_settings(GtkButton *button, gpointer data)
         preferences.default_browser = id && *id ? g_strdup(id) : NULL;
         GError *error = NULL;
         if (!save_sessions(&error)) {
+            g_free(tor_browser_directory); tor_browser_directory = previous_tor_directory;
             g_free(preferences.default_browser);
             preferences = old;
             show_error(error->message);
             g_error_free(error);
         } else {
+            g_free(previous_tor_directory);
+            detect_browsers();
             g_free(old.default_browser);
             for (guint i = 0; i < sessions->len; i++)
                 update_session_ui(g_ptr_array_index(sessions, i));
@@ -1769,6 +1890,7 @@ int main(int argc, char **argv)
         close(app_fd);
         return 1;
     }
+    detect_browsers();
 
     /* ── CSS theme ── */
     GtkCssProvider *css = gtk_css_provider_new();

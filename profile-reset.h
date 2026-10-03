@@ -19,13 +19,13 @@ static gboolean reserve_chromium_at(int root, const char *token, GError **error)
     char *uuid = g_uuid_string_random();
     char *temporary = g_strconcat(".isotab-reserve-", uuid, NULL);
     g_free(uuid);
-    gboolean ok = chromium_marker_stale(old) && symlinkat(token, root, temporary) == 0;
+    gboolean ok = chromium_marker_stale(old, root) && symlinkat(token, root, temporary) == 0;
     if (ok && syscall(SYS_renameat2, root, temporary, root, "SingletonLock", RENAME_EXCHANGE) == 0) {
         char *displaced = read_link_at(root, temporary);
         char *current = read_link_at(root, "SingletonLock");
         ok = !g_strcmp0(displaced, old) && !g_strcmp0(current, token);
         /* Validate the complete displaced snapshot again after exchange. */
-        ok = ok && chromium_marker_stale(displaced);
+        ok = ok && chromium_marker_stale(displaced, root);
 
         if (!ok && !g_strcmp0(current, token))
             (void)syscall(SYS_renameat2, root, temporary, root, "SingletonLock", RENAME_EXCHANGE);
@@ -72,6 +72,7 @@ static gboolean prepare_chromium_launch(const char *path, GError **error)
 
 typedef struct {
     int parent_old, parent_new, old_root, new_root, old_lock, new_lock;
+    int old_tor_lock, new_tor_lock;
     char *old_name, *new_name, *token;
     BrowserFamily family;
     gboolean exchanged;
@@ -84,7 +85,8 @@ static void reset_release(ProfileReset *reset)
         if (reset->old_root >= 0) release_chromium_at(reset->old_root, reset->token);
         if (reset->new_root >= 0) release_chromium_at(reset->new_root, reset->token);
     }
-    int fds[] = {reset->old_lock, reset->new_lock, reset->old_root, reset->new_root, reset->parent_old, reset->parent_new};
+    int fds[] = {reset->old_lock, reset->new_lock, reset->old_tor_lock, reset->new_tor_lock,
+        reset->old_root, reset->new_root, reset->parent_old, reset->parent_new};
     for (guint i = 0; i < G_N_ELEMENTS(fds); i++) if (fds[i] >= 0) close(fds[i]);
     g_free(reset->old_name); g_free(reset->new_name); g_free(reset->token); g_free(reset);
 }
@@ -108,6 +110,7 @@ static ProfileReset *reset_prepare(const char *old_path, const char *new_path,
 {
     ProfileReset *r = g_new0(ProfileReset, 1);
     r->parent_old = r->parent_new = r->old_root = r->new_root = r->old_lock = r->new_lock = -1;
+    r->old_tor_lock = r->new_tor_lock = -1;
     r->family = family;
     char *parent = g_path_get_dirname(old_path);
     r->parent_old = open_directory(parent); g_free(parent);
@@ -129,6 +132,9 @@ static ProfileReset *reset_prepare(const char *old_path, const char *new_path,
         r->old_lock = lock_profile_at(r->old_root, error);
         r->new_lock = r->old_lock < 0 ? -1 : lock_profile_at(r->new_root, error);
         if (r->old_lock < 0 || r->new_lock < 0) goto failed;
+        r->old_tor_lock = tor_data_guard_at(r->old_root, error);
+        r->new_tor_lock = r->old_tor_lock == -1 ? -1 : tor_data_guard_at(r->new_root, error);
+        if (r->old_tor_lock == -1 || r->new_tor_lock == -1) goto failed;
     } else {
         r->old_lock = open_lock_at(r->old_root, ".isotab.lock");
         r->new_lock = open_lock_at(r->new_root, ".isotab.lock");

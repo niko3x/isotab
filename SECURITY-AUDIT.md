@@ -1,6 +1,6 @@
 # IsoTab security review
 
-Initial review: 2026-10-02; follow-up: 2026-10-03. Scope: application source,
+Initial review: 2026-10-02; follow-ups: 2026-10-03 and 2026-10-04. Scope: application source,
 browser descriptors, build and installation scripts, tests, desktop entry,
 SVG/resource definitions, and the resulting executable in this workspace.
 The initial review predated the Git repository; the follow-up included the
@@ -127,8 +127,9 @@ librsvg 2.62.4. This is an inventory, not a dependency-CVE clearance.
   A failure is reported without recursive deletion of the original profile.
 - Native browser executables and `du` are resolved through the user's PATH;
   the desktop environment and executable search path must be trusted.
-- Firefox and Chrome received live integration tests. Other declared browser
-  variants, sandboxed packaging, other desktops, network filesystems and
+- Firefox, Chrome and Tor received live integration tests. A real Flatpak
+  namespace was tested using an inert command in an existing runtime. Individual
+  packaged browser builds, LibreWolf, Snap, other desktops, network filesystems and
   dependency CVE status were not comprehensively tested in this review.
 
 ## Follow-up: reconnecting browser sessions
@@ -179,3 +180,35 @@ create a single child through an already validated parent directory descriptor
 and reject symlinks. A regression test confirms that an outside directory stays
 untouched. Build, unit, UI and live Firefox/Chrome integration checks passed
 after the change; the tests used temporary profiles.
+
+## Follow-up: browser packaging and Tor
+
+Native LibreWolf, known Flatpak application IDs, Snap Firefox/Chromium/Brave,
+and Tor Browser 15+ bundles have separate persisted adapter IDs. Native Snap
+wrappers are excluded; package discovery runs asynchronously. Flatpak adds a
+per-launch grant for the selected profile rather than a persistent override.
+Snap profiles and trash live under each package's revision-independent common
+directory; descriptor-based creation rejects redirected storage paths.
+
+Flatpak Chromium markers contain a namespace PID. A host PID is resolved through
+NSpid plus the matching profile arguments/open files before reconnecting or
+deciding a marker is stale. Inaccessible process information fails closed.
+Full marker validation still applies to each snapshot during reservation races.
+Adapter identity tags survive partial purges until final cleanup so retries
+retain the correct lock interpretation.
+
+Tor sessions share only installed program files and distributed Tor defaults.
+Each session has its own browser profile and Tor data, dynamic SOCKS port and
+per-process control socket. The managed user.js block updates data paths after
+recovery; unknown user.js files are preserved and refused. Import rejects Tor
+profiles assigned to ordinary Firefox and the reverse. Tor's data lock guards
+reset/purge even after its browser exits. Stop pins and rechecks a daemon's exact
+bundle executable and data-directory arguments before signaling it. This does
+not claim distinct exit circuits or unlinkability between sessions.
+
+Evidence: tests/adapters_test.c covers arguments, discovery, storage, profile
+compatibility, Tor daemon locking and sandbox marker ownership. The live package
+integration check ran two Tor 15.0.22 browser/daemon pairs and a real Flatpak PID
+namespace. It covers reconnect/Stop, active protection, stale-marker recovery,
+reset and purge. No Snap browser is installed here; real Snap and individual
+Flatpak browser builds remain distribution-testing work.

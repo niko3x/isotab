@@ -92,8 +92,8 @@ static char *read_link_at(int dirfd, const char *name)
 static gboolean delete_entry_at(int parent, const char *name, dev_t device,
                                 unsigned depth, GError **error);
 
-static gboolean delete_contents_at(int fd, const char *keep1, const char *keep2,
-                                   dev_t device, unsigned depth, GError **error)
+static gboolean delete_contents_preserving_at(int fd, const char *const *keep, gsize keep_count,
+                                             dev_t device, unsigned depth, GError **error)
 {
     int copy = openat(fd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (copy < 0) { file_error(error, "Cannot open directory"); return FALSE; }
@@ -108,12 +108,20 @@ static gboolean delete_contents_at(int fd, const char *keep1, const char *keep2,
             break;
         }
         const char *name = entry->d_name;
-        if (!strcmp(name, ".") || !strcmp(name, "..") ||
-            !g_strcmp0(name, keep1) || !g_strcmp0(name, keep2)) continue;
+        gboolean retained = !strcmp(name, ".") || !strcmp(name, "..");
+        for (gsize i = 0; i < keep_count; i++) retained |= !g_strcmp0(name, keep[i]);
+        if (retained) continue;
         if (!delete_entry_at(fd, name, device, depth + 1, error)) { ok = FALSE; break; }
     }
     closedir(entries);
     return ok;
+}
+
+static gboolean delete_contents_at(int fd, const char *keep1, const char *keep2,
+                                   dev_t device, unsigned depth, GError **error)
+{
+    const char *keep[] = {keep1, keep2};
+    return delete_contents_preserving_at(fd, keep, G_N_ELEMENTS(keep), device, depth, error);
 }
 
 static gboolean delete_entry_at(int parent, const char *name, dev_t device,

@@ -84,8 +84,16 @@ int main(void)
 
     /* Interrupted deletion is resumed from detached trash, never advertised
      * as a restorable backup. Simulate partial deletion using a depth limit. */
-    Session *ff = fixture("firefox");
+    Session *ff = fixture("tor-browser-flatpak");
     g_assert_cmpint(g_mkdir_with_parents(ff->profile_dir, 0700), ==, 0);
+    int tagged_root = open_profile_directory(ff->profile_dir, &error);
+    g_assert_no_error(error);
+    int tagged_fd = open_lock_at(tagged_root, ".isotab-sandbox"); close(tagged_fd);
+    tagged_fd = open_lock_at(tagged_root, ".isotab-tor"); close(tagged_fd);
+    close(tagged_root);
+    char *tor_data = g_build_filename(ff->profile_dir, "tor-data", NULL);
+    tagged_fd = ensure_profile_directory(tor_data, &error);
+    g_assert_no_error(error); close(tagged_fd); g_free(tor_data);
     char *nested = g_strdup(ff->profile_dir);
     for (int i = 0; i < 130; i++) {
         char *next = g_build_filename(nested, "deep", NULL);
@@ -97,6 +105,11 @@ int main(void)
     g_assert_true(started); g_assert_nonnull(error); g_clear_error(&error);
     char *trash = recovery_trash_path(ff->id);
     g_assert_true(g_file_test(trash, G_FILE_TEST_IS_DIR));
+    tagged_root = open_profile_directory(trash, &error);
+    g_assert_no_error(error);
+    g_assert_true(profile_tag_at(tagged_root, ".isotab-sandbox"));
+    g_assert_true(profile_tag_at(tagged_root, ".isotab-tor"));
+    close(tagged_root);
     g_assert_true(path_missing(ff->profile_dir));
     reload();
     ff = g_ptr_array_index(retained_sessions, 0);

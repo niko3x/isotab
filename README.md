@@ -16,11 +16,46 @@ Click **Add session**, choose an installed browser, and optionally name the
 session. Launch it with one click afterward. The browser assignment is fixed:
 create another session to use a different browser rather than sharing its data.
 
-Supported native executables detected in PATH:
+Supported browsers:
 
 - Firefox and Firefox ESR
+- LibreWolf
+- Tor Browser 15 or newer (installed bundle)
 - Chromium and Google Chrome
 - Brave, Microsoft Edge and Vivaldi
+
+Native browsers are detected in PATH. Installed Flatpak variants of Firefox,
+LibreWolf, Tor Browser Launcher, Chromium, Chrome, Brave, Edge and Vivaldi are
+separate choices. Snap variants of Firefox, Chromium and Brave are also separate
+choices. A native browser and its packaged variant can run simultaneously.
+Package discovery runs in the background; a newly installed Flatpak can take up
+to 30 seconds to appear. Snap wrappers are excluded from native detection.
+
+Flatpak launches grant access to the selected profile directory for that launch.
+IsoTab does not create persistent Flatpak overrides. Chromium singleton markers
+written inside a Flatpak namespace are translated to a host process using its
+namespace PID and profile arguments/open files. Unverifiable owners remain
+protected. Snap profiles use `~/snap/<browser>/common/isotab/profiles/<session ID>`
+because strict Snap confinement cannot access `~/.isotab`. Session metadata stays
+in `~/.isotab`; back up Snap profile folders separately.
+
+Tor Browser uses the installed bundle's browser and Tor executables with a fresh
+profile and separate `tor-data` directory for each session. It reads the bundle's
+distributed Tor defaults without copying its personal profile or Tor state.
+SOCKS ports are assigned automatically and control connections use Tor's unique
+IPC directories. Stop also signals a verified session-specific Tor daemon through
+a process descriptor; Clear/Remove/deletion remain blocked while Tor retains its
+data lock. This is profile and Tor-state separation, not a guarantee of distinct
+exit relays or unlinkability between sessions.
+
+Run Tor Browser Launcher once to download and verify its bundle before using
+IsoTab, including for its Flatpak variant. Native bundles installed by the launcher
+or under `~/tor-browser/Browser` are detected. For another location choose the
+installation folder in Settings. Tor's normal connection screen appears on first
+launch. IsoTab manages a marked block in `user.js` for Tor data paths and the
+control socket setting; custom lines after that block are preserved. Unmanaged
+`user.js` files are refused rather than overwritten. Tor profiles cannot be
+imported as ordinary Firefox profiles or vice versa.
 
 Alt+1 through Alt+0 launch the first ten sessions. The scrollable list has no
 fixed ten-session limit. Ctrl+Q closes the launcher and leaves browsers open.
@@ -52,7 +87,8 @@ entries without timestamps show Date unavailable.
 **Delete permanently** in Recovery asks for confirmation and frees disk space.
 It cannot be undone. A locked browser blocks deletion. The owned profile is
 moved into private `~/.isotab/trash/<session ID>` under its native lock before
-removal. Interrupted deletion stays marked as incomplete, cannot be restored,
+removal (Snap uses `~/snap/<browser>/common/isotab/trash` on the same filesystem
+as its profiles). Interrupted deletion stays marked as incomplete, cannot be restored,
 and offers Retry delete. Missing folders offer **Forget entry**, which only
 removes metadata. Restore rejects missing or inaccessible folders instead of
 creating an empty replacement.
@@ -68,7 +104,8 @@ identities or an additional operating-system sandbox.
 
 The Settings button opens Preferences, Storage, Recovery and Tips tabs. Choose the default
 browser for new sessions, show or hide profile sizes, and enable or disable
-Alt+number quick launch. Save applies these preferences and persists them;
+Alt+number quick launch, and select a native Tor Browser installation folder.
+Save applies these preferences and persists them;
 Cancel leaves them unchanged. Ctrl+Q remains available.
 
 Storage shows copyable paths for every session, the profile root and the settings
@@ -82,7 +119,8 @@ On first startup, IsoTab imports existing `~/.isotab/session_0` through
 moved or rewritten by migration. Empty slots are replaced by Add session.
 
 Session names and browser choices are stored in `~/.isotab/sessions.ini`.
-New profiles live under `~/.isotab/profiles/<session UUID>`. Legacy profiles
+Native and Flatpak profiles live under `~/.isotab/profiles/<session UUID>`;
+Snap profiles use their browser's common data directory described above. Legacy profiles
 keep their original paths. Settings are saved atomically with owner-only
 permissions. Only one new launcher instance can edit settings at a time.
 Close any older IsoTab launcher before running this version.
@@ -121,8 +159,9 @@ Locking and profile arguments follow the upstream implementations:
 
 Requires a C compiler, Make, pkg-config, GTK 3 development files, GLib 2.66+
 (including glib-compile-resources), an SVG loader (librsvg), and `du` for profile
-sizes. Install at least one supported native browser separately. Flatpak and
-Snap launch adapters are not implemented.
+sizes. Install at least one supported browser separately. Flatpak and Snap
+adapters use the package manager already installed on your system; IsoTab does
+not install browsers, runtimes or Tor bundles.
 
 Build with `make`, then run `./isotab`. The icon is embedded in the executable.
 `bash install.sh` installs build dependencies and builds; it does not download
@@ -139,7 +178,9 @@ when uninstalling. Install and uninstall do not change browser profiles.
 `make test` covers Firefox and Chromium lock handling, stale markers, symlink
 safety, migration, settings round-trips, invalid settings, argument handling,
 recoverable resets, interruption points, rollback, rename, restore, marker races,
-import compatibility and guarded/retried permanent deletion.
+import compatibility, guarded/retried permanent deletion, packaging arguments,
+asynchronous Flatpak discovery, Snap storage, Tor profile path initialization,
+Tor daemon locking and sandbox marker ownership.
 
 `make integration-test` launches Firefox and two sessions of an installed
 Chromium-family browser headlessly, using temporary profiles. It verifies
@@ -154,6 +195,23 @@ Clear, removal, Settings Recovery, rename, importing an unlisted profile and
 restart persistence using a temporary HOME. It also checks recovery sizes,
 cancel/confirm deletion, forgetting missing entries and dialog safety during
 background deletion.
+
+`make package-integration-test` exercises two installed Tor Browser sessions,
+including independent daemons, reconnect/Stop, active reset protection and
+reset/purge after exit. It skips Tor when no supported bundle is available.
+Set `ISOTAB_TEST_FLATPAK_APP` to an installed application ID to additionally run
+an inert test shell inside its existing runtime. That check verifies real PID
+namespace translation, the profile filesystem grant, active-profile protection
+and stale-marker recovery; it does not launch the application's normal UI.
+Tor 15.0.22 and a real Flatpak namespace have been exercised here. Individual
+Flatpak browser builds, LibreWolf and Snap browsers still need distribution
+testing; the local machine has no Snap installation.
+
+Packaging references:
+
+- [Flatpak run and per-launch permissions](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-run)
+- [Snap common data directories](https://snapcraft.io/docs/reference/administration/data-locations/)
+- [Tor Browser Launcher installation and verification](https://github.com/torproject/torbrowser-launcher)
 
 ## Security boundaries
 
