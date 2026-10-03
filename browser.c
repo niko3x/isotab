@@ -1817,14 +1817,6 @@ int main(int argc, char **argv)
     gtk_box_pack_start(GTK_BOX(heading), svg_icon(NULL, 32), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(heading), title, FALSE, FALSE, 0);
 
-    GtkWidget *sub = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(sub),
-        "<span foreground='#888'>"
-        "Your browsers, separate profiles.</span>");
-    gtk_label_set_xalign(GTK_LABEL(sub), 0.0);
-    gtk_label_set_line_wrap(GTK_LABEL(sub), TRUE);
-    gtk_label_set_max_width_chars(GTK_LABEL(sub), 80);
-
     GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_margin_top(sep, 6);
     gtk_widget_set_margin_bottom(sep, 10);
@@ -1853,7 +1845,6 @@ int main(int argc, char **argv)
 
     /* ── assemble ── */
     gtk_box_pack_start(GTK_BOX(root), heading, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(root), sub,   FALSE, FALSE, 4);
     gtk_box_pack_start(GTK_BOX(root), sep,   FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(root), empty_label, FALSE, FALSE, 12);
     gtk_box_pack_start(GTK_BOX(root), scroll, TRUE, TRUE, 0);
