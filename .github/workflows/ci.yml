@@ -1,0 +1,27 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and UI test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make pkg-config libgtk-3-dev libglib2.0-dev librsvg2-common xvfb
+      - name: Build
+        run: make
+      - name: Run unit and security regression tests
+        run: make test
+      - name: Run UI tests in a virtual display
+        run: xvfb-run -a make ui-test
+      - name: Check installer syntax
+        run: bash -n install.sh

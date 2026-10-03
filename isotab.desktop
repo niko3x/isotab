@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=IsoTab
+Comment=Launch separate browser sessions with their own cookies, logins, and data
+Exec=isotab
+Icon=isotab
+Type=Application
+Categories=Network;WebBrowser;Security;
+Keywords=browser;isolated;sessions;profiles;firefox;chromium;chrome;brave;privacy;
+StartupNotify=true

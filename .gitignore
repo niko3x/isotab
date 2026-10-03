@@ -1,0 +1,7 @@
+/isotab
+/isotab-resources.c
+*.o
+*.core
+/core
+.DS_Store
+*~

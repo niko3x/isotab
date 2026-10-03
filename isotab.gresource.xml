@@ -1,0 +1,5 @@
+<gresources>
+  <gresource prefix="/org/isotab">
+    <file>isotab.svg</file>
+  </gresource>
+</gresources>
