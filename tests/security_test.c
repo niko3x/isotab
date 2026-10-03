@@ -45,6 +45,27 @@ int main(void)
     g_assert_nonnull(error); g_clear_error(&error);
     g_assert_cmpint(chmod(profile, 0700), ==, 0);
 
+    /* Creating a profile must not follow a substituted storage directory. */
+    char *profiles = g_build_filename(base, "profiles", NULL);
+    char *new_profile = g_build_filename(profiles, "new-profile", NULL);
+    char *outside_child = g_build_filename(outside, "new-profile", NULL);
+    g_assert_cmpint(symlink(outside, profiles), ==, 0);
+    g_assert_cmpint(ensure_profile_directory(profiles, &error), ==, -1);
+    g_assert_nonnull(error); g_clear_error(&error);
+    g_assert_cmpint(ensure_profile_directory(new_profile, &error), ==, -1);
+    g_assert_nonnull(error); g_clear_error(&error);
+    g_assert_false(g_file_test(outside_child, G_FILE_TEST_EXISTS));
+    g_assert_cmpint(unlink(profiles), ==, 0);
+    int profiles_fd = ensure_profile_directory(profiles, &error);
+    g_assert_no_error(error);
+    g_assert_cmpint(profiles_fd, >=, 0);
+    close(profiles_fd);
+    int new_profile_fd = ensure_profile_directory(new_profile, &error);
+    g_assert_no_error(error);
+    g_assert_cmpint(new_profile_fd, >=, 0);
+    close(new_profile_fd);
+    g_free(outside_child); g_free(new_profile); g_free(profiles);
+
     /* Concurrently exchange a real directory and an outside-pointing symlink.
      * Deletion may abort, but must never walk through the substituted link. */
     int root = open_profile_directory(profile, &error);
@@ -119,6 +140,6 @@ int main(void)
     g_free(config); g_free(via_alias); g_free(alias); g_free(chrome_lock);
     g_free(sentinel); g_free(outside); g_free(ff_lock); g_free(profile); g_free(base);
     alarm(0);
-    g_print("Security checks passed: FIFO/hardlink/ancestor symlink rejection, settings validation and deletion race stress.\n");
+    g_print("Security checks passed: FIFO/hardlink/ancestor symlink rejection, safe profile creation, settings validation and deletion race stress.\n");
     return 0;
 }

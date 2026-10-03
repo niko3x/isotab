@@ -1,9 +1,10 @@
 # IsoTab security review
 
-Date: 2026-10-02. Scope: all application source, browser descriptors, build and
-installation scripts, tests, desktop entry, SVG/resource definitions, and the
-resulting executable in this workspace. No Git metadata was available, so this
-does not cover commit history or remote branches.
+Initial review: 2026-10-02; follow-up: 2026-10-03. Scope: application source,
+browser descriptors, build and installation scripts, tests, desktop entry,
+SVG/resource definitions, and the resulting executable in this workspace.
+The initial review predated the Git repository; the follow-up included the
+tracked files and local changes, but not a remote dependency audit.
 
 ## Result
 
@@ -167,3 +168,14 @@ between validation reads and exchange. tests/recovery_test.c covers absent
 restores, incompatible/mixed imports, dates, native lock refusal, outside-symlink
 protection and depth-limit interruption/retry. tests/ui_recovery_test.c covers
 sizes, cancellation, confirmed deletion, pending-dialog protection and forgetting.
+
+## Follow-up: profile directory creation
+
+Launch, reset and permanent deletion previously called `g_mkdir_with_parents`
+before validating profile storage paths. A substituted `profiles` or `trash`
+symlink could make that call create a directory outside IsoTab's data folder,
+even though the following access check rejected the path. These operations now
+create a single child through an already validated parent directory descriptor
+and reject symlinks. A regression test confirms that an outside directory stays
+untouched. Build, unit, UI and live Firefox/Chrome integration checks passed
+after the change; the tests used temporary profiles.

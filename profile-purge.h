@@ -41,8 +41,7 @@ static gboolean purge_profile(const char *original, const char *id, BrowserFamil
     gboolean detached = !path_missing(destination);
     *started = detached;
     if (!detached && path_missing(original)) { ok = TRUE; goto done; }
-    if (g_mkdir_with_parents(trash, 0700) != 0) goto failed;
-    trash_parent = open_profile_directory(trash, error);
+    trash_parent = ensure_profile_directory(trash, error);
     if (trash_parent < 0) goto done;
     root = open_profile_directory(detached ? destination : original, error);
     if (root < 0) goto done;

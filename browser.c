@@ -811,11 +811,23 @@ static void cb_launch(GtkButton *btn, gpointer data)
     }
 
     /* ensure profile directory exists */
-    if (g_mkdir_with_parents(s->profile_dir, 0700) != 0) {
-        show_error(g_strerror(errno));
+    GError *lock_error = NULL;
+    if (!g_str_has_prefix(s->id, "legacy_")) {
+        char *profiles = g_build_filename(data_dir, "profiles", NULL);
+        int parent_fd = ensure_profile_directory(profiles, &lock_error);
+        g_free(profiles);
+        if (parent_fd < 0) {
+            show_error(lock_error->message); g_error_free(lock_error);
+            return;
+        }
+        close(parent_fd);
+    }
+    int profile_fd = ensure_profile_directory(s->profile_dir, &lock_error);
+    if (profile_fd < 0) {
+        show_error(lock_error->message); g_error_free(lock_error);
         return;
     }
-    GError *lock_error = NULL;
+    close(profile_fd);
     gboolean available;
     if (s->browser->family == FAMILY_FIREFOX) {
         int fd = lock_profile(s->profile_dir, &lock_error);

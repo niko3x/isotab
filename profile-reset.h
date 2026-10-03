@@ -112,8 +112,9 @@ static ProfileReset *reset_prepare(const char *old_path, const char *new_path,
     char *parent = g_path_get_dirname(old_path);
     r->parent_old = open_directory(parent); g_free(parent);
     parent = g_path_get_dirname(new_path);
-    if (g_mkdir_with_parents(parent, 0700) != 0) { g_free(parent); goto failed; }
-    r->parent_new = open_directory(parent); g_free(parent);
+    r->parent_new = open_profile_directory(parent, NULL);
+    if (r->parent_new < 0) r->parent_new = ensure_profile_directory(parent, error);
+    g_free(parent);
     r->old_name = g_path_get_basename(old_path);
     r->new_name = g_path_get_basename(new_path);
     if (r->parent_old < 0 || r->parent_new < 0) goto failed;

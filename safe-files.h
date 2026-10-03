@@ -45,6 +45,29 @@ static int open_profile_directory(const char *path, GError **error)
     return -1;
 }
 
+/* Create only the final component through an already validated parent. */
+static int ensure_profile_directory(const char *path, GError **error)
+{
+    char *parent = g_path_get_dirname(path);
+    char *name = g_path_get_basename(path);
+    int parent_fd = open_profile_directory(parent, error);
+    int fd = -1;
+    if (parent_fd >= 0) {
+        if (!strcmp(name, ".") || !strcmp(name, "..") || strchr(name, '/')) {
+            errno = EINVAL;
+            file_error(error, "Invalid profile directory name");
+        } else if (mkdirat(parent_fd, name, 0700) != 0 && errno != EEXIST) {
+            file_error(error, "Cannot create profile directory");
+        } else {
+            fd = open_profile_directory(path, error);
+        }
+        close(parent_fd);
+    }
+    g_free(parent);
+    g_free(name);
+    return fd;
+}
+
 static int open_lock_at(int dirfd, const char *name)
 {
     int fd = openat(dirfd, name, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600);
