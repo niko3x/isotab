@@ -4,8 +4,17 @@
 CC      = gcc
 TARGET  = isotab
 
+# Do not silently introduce APIs newer than our documented library baseline.
+API_FLAGS = -DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_66 \
+            -DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_66 \
+            -DGTK_VERSION_MIN_REQUIRED=GTK_VERSION_3_24 \
+            -DGTK_VERSION_MAX_ALLOWED=GTK_VERSION_3_24 \
+            -Werror=deprecated-declarations
+# Level 3 needs both newer libc headers and dynamic object-size support.
+FORTIFY_LEVEL = $(shell $(CC) -E -P -x c ci/fortify-level.c)
+
 CFLAGS  = $(shell pkg-config --cflags gtk+-3.0) \
-          -O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fPIE -Wall -Wextra -Wno-unused-parameter
+          $(API_FLAGS) -O2 -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-protector-strong -fPIE -Wall -Wextra -Wno-unused-parameter
 LDFLAGS = $(shell pkg-config --libs   gtk+-3.0) -pie -Wl,-z,relro,-z,now,-z,noexecstack
 
 PREFIX  ?= /usr/local
@@ -16,14 +25,14 @@ all: $(TARGET)
 test: isotab-resources.c
 	@set -e; test_bin=$$(mktemp /tmp/isotab-test.XXXXXX); \
 	trap 'rm -f "$$test_bin"' EXIT; \
-	for test_source in tests/profile_test.c tests/sessions_test.c tests/security_test.c tests/reset_test.c tests/lock_race_test.c tests/recovery_test.c tests/adapters_test.c; do \
+	for test_source in tests/profile_test.c tests/sessions_test.c tests/security_test.c tests/reset_test.c tests/lock_race_test.c tests/recovery_test.c tests/adapters_test.c tests/kernel_test.c; do \
 	$(CC) $(CFLAGS) -Werror -o "$$test_bin" "$$test_source" isotab-resources.c $(LDFLAGS); \
 	"$$test_bin"; done
 
 isotab-resources.c: isotab.gresource.xml isotab.svg
 	glib-compile-resources --generate-source --c-name isotab --target=$@ isotab.gresource.xml
 
-$(TARGET): browser.c browsers.h safe-files.h tor-profile.h profile-reset.h profile-import.h profile-purge.h sandbox-process.h isotab-resources.c
+$(TARGET): browser.c browsers.h safe-files.h tor-profile.h profile-reset.h profile-import.h profile-purge.h sandbox-process.h isotab-resources.c Makefile ci/fortify-level.c
 	@echo "  CC  browser.c"
 	@$(CC) $(CFLAGS) -o $(TARGET) browser.c isotab-resources.c $(LDFLAGS)
 	@echo "  > ./$(TARGET) built OK"

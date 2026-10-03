@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,4 +33,28 @@ jobs:
           NO_AT_BRIDGE: "1"
         run: xvfb-run -a make ui-test
       - name: Check installer syntax
-        run: bash -n install.sh
+        run: bash -n install.sh ci/kernel-vm.sh ci/old-libraries.sh
+
+  oldest-libraries:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and test with GLib 2.66 and GCC 10
+        run: bash ci/old-libraries.sh
+
+  kernel-5-15:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install VM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils
+          if [ -e /dev/kvm ]; then sudo chmod a+rw /dev/kvm; fi
+      - name: Test inside an Ubuntu 22.04 VM running Linux 5.15
+        run: bash ci/kernel-vm.sh

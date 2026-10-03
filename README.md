@@ -157,7 +157,7 @@ Locking and profile arguments follow the upstream implementations:
 
 ## Build and install
 
-Requires a C compiler, Make, pkg-config, GTK 3 development files, GLib 2.66+
+Requires a C compiler, Make, pkg-config, GTK 3.24+ development files, GLib 2.66+
 (including glib-compile-resources), an SVG loader (librsvg), and `du` for profile
 sizes. Install at least one supported browser separately. Flatpak and Snap
 adapters use the package manager already installed on your system; IsoTab does
@@ -175,12 +175,34 @@ when uninstalling. Install and uninstall do not change browser profiles.
 
 ## Checks
 
+CI builds and tests on Ubuntu 22.04 and 24.04, plus a Debian 11 container with
+actual GLib 2.66 headers and libraries. Compiler API limits reject accidental
+use of newer GTK/GLib calls. Fortification selects level 3 when the compiler and
+libc support it, otherwise level 2. The Debian 11 job is a compatibility check,
+not a recommendation to deploy an older distribution.
+
+`bash ci/kernel-vm.sh` boots a checksum-verified Ubuntu 22.04 cloud image in
+QEMU, requires a real Linux 5.15 kernel, and runs the build, unit/security and
+headless UI checks there. It needs QEMU, cloud-localds, curl and OpenSSH; its
+source comes from the current Git commit. Container tests alone do not test an
+older kernel. The VM is separate from the host and is deleted after testing.
+
+Safe reconnect/Stop requires Linux 5.3+ process descriptors; Clear and permanent
+deletion require filesystem support for the Linux renameat2 operations. Tests
+also simulate missing/denied syscalls and verify that Stop refuses safely and
+Clear/Delete preserve the original profile. Linux 5.15 is the tested kernel
+baseline; older kernels are not claimed as fully supported.
+
+Build distributable binaries on the oldest supported target environment,
+rather than copying a binary built on a rolling distribution. CI coverage
+does not make a locally compiled binary portable to older libc versions.
+
 `make test` covers Firefox and Chromium lock handling, stale markers, symlink
 safety, migration, settings round-trips, invalid settings, argument handling,
 recoverable resets, interruption points, rollback, rename, restore, marker races,
 import compatibility, guarded/retried permanent deletion, packaging arguments,
 asynchronous Flatpak discovery, Snap storage, Tor profile path initialization,
-Tor daemon locking and sandbox marker ownership.
+Tor daemon locking, sandbox marker ownership and unavailable kernel operations.
 
 `make integration-test` launches Firefox and two sessions of an installed
 Chromium-family browser headlessly, using temporary profiles. It verifies

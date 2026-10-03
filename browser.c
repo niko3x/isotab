@@ -22,6 +22,16 @@
 #include "tor-profile.h"
 #include "sandbox-process.h"
 
+/* Same wait-status API, renamed in GLib 2.70. Keep the 2.66 baseline. */
+static gboolean check_wait_status(gint status, GError **error)
+{
+#if GLIB_CHECK_VERSION(2, 70, 0) && GLIB_VERSION_MAX_ALLOWED >= GLIB_VERSION_2_70
+    return g_spawn_check_wait_status(status, error);
+#else
+    return g_spawn_check_exit_status(status, error);
+#endif
+}
+
 /* ─── constants ──────────────────────────────────────── */
 #define APP_TITLE     "IsoTab - Browser Sessions"
 
@@ -255,7 +265,7 @@ static double profile_size_mb(const char *dir)
         G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL,
         NULL, NULL, &output, NULL, &status, NULL);
     double mb = -1;
-    if (ok && g_spawn_check_wait_status(status, NULL))
+    if (ok && check_wait_status(status, NULL))
         mb = g_ascii_strtod(output, NULL);
     g_free(output);
     return mb;
@@ -807,7 +817,7 @@ static void cb_child_exit(GPid pid, gint status, gpointer data)
     s->size_known = FALSE; s->size_generation++; s->size_pending = FALSE;
     update_session_ui(s);
     GError *error = NULL;
-    if (!g_spawn_check_wait_status(status, &error)) {
+    if (!check_wait_status(status, &error)) {
         if (!(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM))
             show_error(error->message);
         g_error_free(error);
