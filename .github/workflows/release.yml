@@ -1,0 +1,117 @@
+name: Release packages
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  deb-arch-appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install packaging dependencies
+        run: |
+          sudo sed -i '/^# deb-src /s/^# //' /etc/apt/sources.list
+          sudo apt-get update
+          sudo apt-get install -y gcc make pkg-config libgtk-3-dev libglib2.0-dev librsvg2-dev librsvg2-common xvfb xauth dpkg-dev libarchive-tools zstd curl patchelf
+      - run: bash packaging/build-native.sh
+      - run: bash packaging/build-appimage.sh
+      - name: Test AppImage without FUSE
+        run: |
+          cd /tmp
+          "$GITHUB_WORKSPACE"/dist/*.AppImage --appimage-extract >/dev/null
+          bash "$GITHUB_WORKSPACE/packaging/smoke.sh" /tmp/squashfs-root/AppRun
+      - name: Source and rebuild recipe
+        run: |
+          version=$(cat VERSION)
+          git archive --prefix="isotab-$version/" HEAD | gzip -n > "dist/isotab-$version.tar.gz"
+          digest=$(sha256sum "dist/isotab-$version.tar.gz" | cut -d' ' -f1)
+          sed "s/@SOURCE_SHA256@/$digest/" packaging/PKGBUILD > dist/PKGBUILD
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb-arch-appimage
+          path: dist/*
+          if-no-files-found: error
+  rpm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build on Enterprise Linux 9
+        run: |
+          mkdir -p dist
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/dist:/out" almalinux:9 bash -euxc '
+            dnf install -y gcc make git rpm-build gtk3-devel glib2-devel librsvg2
+            useradd -m builder
+            cp -a /source /build
+            chown -R builder:builder /build
+            runuser -u builder -- bash -c "cd /build && git config --global --add safe.directory /build && bash packaging/build-rpm.sh"
+            cp /build/dist/*.rpm /out/
+          '
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+  install-test:
+    needs: [deb-arch-appimage, rpm]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04', 'debian:12', 'archlinux:base', 'almalinux:9', 'fedora:latest']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*'
+          merge-multiple: true
+          path: dist
+      - name: Install and launch actual package
+        env:
+          TEST_IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD:/source:ro" "$TEST_IMAGE" bash -euxc '
+            if command -v apt-get; then
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y /source/dist/*.deb xvfb xauth
+            elif command -v pacman; then
+              pacman -Syu --noconfirm
+              pacman -S --noconfirm xorg-server-xvfb xorg-xauth sudo
+              pacman -U --noconfirm /source/dist/*.pkg.tar.zst
+            else
+              dnf install -y /source/dist/isotab-*.x86_64.rpm xorg-x11-server-Xvfb xorg-x11-xauth
+            fi
+            useradd -m tester
+            runuser -u tester -- bash /source/packaging/smoke.sh
+          '
+  publish:
+    needs: [install-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Publish tested downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          cd dist
+          sha256sum * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --verify-tag --prerelease \
+            --title "IsoTab $GITHUB_REF_NAME - Public beta" \
+            --notes-file ../packaging/RELEASE-NOTES.md *

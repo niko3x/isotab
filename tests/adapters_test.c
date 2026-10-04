@@ -17,6 +17,30 @@ static void write_fixture(const char *path, const char *contents, gboolean execu
 int main(void)
 {
     alarm(40);
+    /* AppImage hooks must not leak their libraries/settings into browsers. */
+    char **before = g_get_environ();
+    g_setenv("ISOTAB_APPIMAGE_ENV", "1", TRUE);
+    g_setenv("LD_LIBRARY_PATH", "/bundle/lib", TRUE);
+    g_setenv("ISOTAB_HOST_LD_LIBRARY_PATH", "/host/lib with spaces", TRUE);
+    g_setenv("GTK_PATH", "/bundle/gtk", TRUE);
+    g_unsetenv("ISOTAB_HOST_GTK_PATH");
+    g_setenv("ISOTAB_HOST_GTK_THEME", "", TRUE);
+    g_setenv("GTK_THEME", "Adwaita", TRUE);
+    char **host = browser_environment(find_browser("firefox"));
+    g_assert_cmpstr(g_environ_getenv(host, "LD_LIBRARY_PATH"), ==, "/host/lib with spaces");
+    g_assert_null(g_environ_getenv(host, "GTK_PATH"));
+    g_assert_cmpstr(g_environ_getenv(host, "GTK_THEME"), ==, "");
+    g_assert_null(g_environ_getenv(host, "ISOTAB_HOST_LD_LIBRARY_PATH"));
+    g_assert_null(g_environ_getenv(host, "ISOTAB_APPIMAGE_ENV"));
+    g_assert_cmpstr(g_getenv("LD_LIBRARY_PATH"), ==, "/bundle/lib");
+    g_strfreev(host);
+    const char *restore[] = {"ISOTAB_APPIMAGE_ENV", "LD_LIBRARY_PATH", "ISOTAB_HOST_LD_LIBRARY_PATH",
+        "GTK_PATH", "ISOTAB_HOST_GTK_PATH", "GTK_THEME", "ISOTAB_HOST_GTK_THEME", NULL};
+    for (guint i = 0; restore[i]; i++) {
+        const char *value = g_environ_getenv(before, restore[i]);
+        if (value) g_setenv(restore[i], value, TRUE); else g_unsetenv(restore[i]);
+    }
+    g_strfreev(before);
     GError *error = NULL;
     data_dir = g_dir_make_tmp("isotab-adapters-XXXXXX", &error);
     g_assert_no_error(error);

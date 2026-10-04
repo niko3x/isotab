@@ -5,3 +5,6 @@
 /core
 .DS_Store
 *~
+
+/dist/
+/AppDir/

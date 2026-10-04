@@ -157,8 +157,8 @@ static gboolean mark_imported_package_profile(int root, Browser *browser, GError
 
 static char **browser_environment(Browser *browser)
 {
-    if (!browser_is_tor(browser)) return NULL;
-    char **env = g_get_environ();
+    char **env = host_environment();
+    if (!browser_is_tor(browser)) return env;
     /* External Tor overrides must not silently bypass this session's daemon. */
     const char *unset[] = {"TOR_TRANSPROXY", "TOR_SKIP_LAUNCH", "TOR_PROVIDER", "TOR_SOCKS_HOST", "TOR_SOCKS_IPC_PATH",
         "TOR_CONTROL_HOST", "TOR_CONTROL_PORT", "TOR_CONTROL_IPC_PATH", "TOR_CONTROL_PASSWD", "TOR_CONTROL_COOKIE_AUTH_FILE",

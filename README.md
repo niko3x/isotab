@@ -248,3 +248,26 @@ Run IsoTab as your regular desktop user. The app rejects root execution and
 requires its data folder to be private (0700). Settings are bounded to 1 MiB
 and loaded only from an owned regular file. See SECURITY-AUDIT.md for the
 review scope, fixes, test evidence and remaining limitations.
+
+## Downloadable packages
+
+The [Releases page](https://github.com/niko3x/isotab/releases) provides x86-64
+DEB (Ubuntu 22.04+, Debian 12+, Mint 21+), pacman (Arch, Manjaro, CachyOS),
+RPM (RHEL 9+ family and Fedora), and AppImage (glibc 2.35+) downloads.
+See each release's installation instructions and SHA256SUMS. ARM, RHEL 8 and
+musl/Alpine are not supported by these binaries. The packages are release
+assets, not entries in GitHub's container/package registry or distro repositories.
+
+Native packages use system GTK3; the AppImage bundles GTK3 and restores the
+host environment when launching browsers and external tools. It supports
+`--appimage-extract-and-run` when FUSE is unavailable. Browsers are not bundled.
+All formats use the existing profile locations; uninstalling a package does not
+remove profiles. An older manual installation in `/usr/local/bin` can shadow a
+package in `/usr/bin`; remove that old launcher after switching to a package.
+
+The `Release packages` workflow builds DEB, pacman and AppImage on Ubuntu 22.04,
+RPM on AlmaLinux 9, then installs and launches native packages on six clean
+container environments before publishing a tagged prerelease. A manual workflow
+run builds/test artifacts without publishing. Bundled library sources, application
+source and a checksummed PKGBUILD accompany the release. `packaging/PKGBUILD`
+is a template; use the filled-in recipe attached to the release.

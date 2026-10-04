@@ -94,8 +94,14 @@ static void refresh_flatpak_apps(const char *flatpak)
     gint64 now = g_get_monotonic_time();
     if (!flatpak || flatpak_scan_pending || (flatpak_last_scan && now - flatpak_last_scan < 30 * G_USEC_PER_SEC)) return;
     flatpak_last_scan = now;
-    GSubprocess *scan = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE,
+    GSubprocessLauncher *launcher = g_subprocess_launcher_new(
+        G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    char **environment = host_environment();
+    g_subprocess_launcher_set_environ(launcher, environment);
+    GSubprocess *scan = g_subprocess_launcher_spawn(launcher,
         NULL, flatpak, "list", "--app", "--columns=application", NULL);
+    g_strfreev(environment);
+    g_object_unref(launcher);
     if (!scan) return;
     flatpak_scan_pending = TRUE;
     g_subprocess_communicate_utf8_async(scan, NULL, NULL, flatpak_scan_done, NULL);

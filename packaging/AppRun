@@ -1,0 +1,14 @@
+#!/bin/bash
+# Save the desktop environment before linuxdeploy's hooks change it.
+for key in PATH LD_LIBRARY_PATH XDG_DATA_DIRS GTK_DATA_PREFIX GTK_EXE_PREFIX GTK_PATH GTK_IM_MODULE_FILE GTK_THEME GDK_BACKEND GDK_PIXBUF_MODULE_FILE GDK_PIXBUF_MODULEDIR GSETTINGS_SCHEMA_DIR GI_TYPELIB_PATH GIO_MODULE_DIR; do
+    saved="ISOTAB_HOST_$key"
+    unset "$saved"
+    if [[ -v $key ]]; then
+        printf -v "$saved" '%s' "${!key}"
+        export "$saved"
+    fi
+done
+export ISOTAB_APPIMAGE_ENV=1
+APPDIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+export APPDIR
+exec "$APPDIR/AppRun.wrapped" "$@"

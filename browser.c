@@ -17,6 +17,7 @@
 #include <sys/file.h>
 #include <limits.h>
 #include <sys/syscall.h>
+#include "host-environment.h"
 #include "browsers.h"
 #include "safe-files.h"
 #include "tor-profile.h"
@@ -261,9 +262,11 @@ static double profile_size_mb(const char *dir)
     char *argv[] = { "du", "-sm", "--", (char *)dir, NULL };
     char *output = NULL;
     int status;
-    gboolean ok = g_spawn_sync(NULL, argv, NULL,
+    char **environment = host_environment();
+    gboolean ok = g_spawn_sync(NULL, argv, environment,
         G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL,
         NULL, NULL, &output, NULL, &status, NULL);
+    g_strfreev(environment);
     double mb = -1;
     if (ok && check_wait_status(status, NULL))
         mb = g_ascii_strtod(output, NULL);
@@ -1360,7 +1363,24 @@ static void open_data_folder(GtkButton *button, gpointer data)
     (void)button;
     GError *error = NULL;
     char *uri = g_filename_to_uri(data_dir, NULL, &error);
-    if (uri) gtk_show_uri_on_window(GTK_WINDOW(data), uri, GDK_CURRENT_TIME, &error);
+    if (uri) {
+        GdkAppLaunchContext *context = gdk_display_get_app_launch_context(gdk_display_get_default());
+        char **environment = host_environment();
+        char **current = g_app_launch_context_get_environment(G_APP_LAUNCH_CONTEXT(context));
+        for (guint i = 0; current[i]; i++) {
+            char *key = g_strndup(current[i], strchr(current[i], '=') - current[i]);
+            g_app_launch_context_unsetenv(G_APP_LAUNCH_CONTEXT(context), key);
+            g_free(key);
+        }
+        for (guint i = 0; environment[i]; i++) {
+            const char *equal = strchr(environment[i], '=');
+            char *key = g_strndup(environment[i], equal - environment[i]);
+            g_app_launch_context_setenv(G_APP_LAUNCH_CONTEXT(context), key, equal + 1);
+            g_free(key);
+        }
+        g_app_info_launch_default_for_uri(uri, G_APP_LAUNCH_CONTEXT(context), &error);
+        g_strfreev(current); g_strfreev(environment); g_object_unref(context);
+    }
     g_free(uri);
     if (error) { show_error(error->message); g_error_free(error); }
 }
@@ -1858,6 +1878,10 @@ static gboolean refresh_sessions(gpointer data)
 ═══════════════════════════════════════════════════════ */
 int main(int argc, char **argv)
 {
+    if (argc == 2 && !strcmp(argv[1], "--version")) {
+        g_print("IsoTab %s\n", ISOTAB_VERSION);
+        return 0;
+    }
     if (geteuid() == 0) {
         g_printerr("Run IsoTab as your regular desktop user, not as root.\n");
         return 1;

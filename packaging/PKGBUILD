@@ -1,0 +1,16 @@
+# Maintainer: niko3x
+pkgname=isotab
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='Manage separate browser profiles'
+arch=('x86_64')
+url='https://github.com/niko3x/isotab'
+license=('GPL-3.0-only')
+depends=('gtk3' 'glib2>=2.66' 'librsvg')
+makedepends=('gcc' 'make' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/isotab-$pkgver.tar.gz")
+# Replaced with the exact source digest in the downloadable recipe.
+sha256sums=('@SOURCE_SHA256@')
+build() { cd "$pkgname-$pkgver"; make; }
+check() { cd "$pkgname-$pkgver"; make test; }
+package() { cd "$pkgname-$pkgver"; make install PREFIX=/usr DESTDIR="$pkgdir"; }

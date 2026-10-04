@@ -3,6 +3,7 @@
 
 CC      = gcc
 TARGET  = isotab
+VERSION = $(shell cat VERSION)
 
 # Do not silently introduce APIs newer than our documented library baseline.
 API_FLAGS = -DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_66 \
@@ -14,7 +15,7 @@ API_FLAGS = -DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_66 \
 FORTIFY_LEVEL = $(shell $(CC) -E -P -x c ci/fortify-level.c)
 
 CFLAGS  = $(shell pkg-config --cflags gtk+-3.0) \
-          $(API_FLAGS) -O2 -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-protector-strong -fPIE -Wall -Wextra -Wno-unused-parameter
+          $(API_FLAGS) -DISOTAB_VERSION=\"$(VERSION)\" -O2 -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-protector-strong -fPIE -Wall -Wextra -Wno-unused-parameter
 LDFLAGS = $(shell pkg-config --libs   gtk+-3.0) -pie -Wl,-z,relro,-z,now,-z,noexecstack
 
 PREFIX  ?= /usr/local
@@ -32,7 +33,7 @@ test: isotab-resources.c
 isotab-resources.c: isotab.gresource.xml isotab.svg
 	glib-compile-resources --generate-source --c-name isotab --target=$@ isotab.gresource.xml
 
-$(TARGET): browser.c browsers.h safe-files.h tor-profile.h profile-reset.h profile-import.h profile-purge.h sandbox-process.h isotab-resources.c Makefile ci/fortify-level.c
+$(TARGET): browser.c host-environment.h VERSION browsers.h safe-files.h tor-profile.h profile-reset.h profile-import.h profile-purge.h sandbox-process.h isotab-resources.c Makefile ci/fortify-level.c
 	@echo "  CC  browser.c"
 	@$(CC) $(CFLAGS) -o $(TARGET) browser.c isotab-resources.c $(LDFLAGS)
 	@echo "  > ./$(TARGET) built OK"
@@ -41,7 +42,8 @@ install: $(TARGET)
 	install -Dm755 $(TARGET)        $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	install -Dm644 isotab.desktop   $(DESTDIR)$(DATADIR)/applications/isotab.desktop
 	install -Dm644 isotab.svg $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/isotab.svg
-	gtk-update-icon-cache -f -t $(DESTDIR)$(DATADIR)/icons/hicolor
+	@if [ -z "$(DESTDIR)" ]; then gtk-update-icon-cache -f -t $(DATADIR)/icons/hicolor; fi
+	install -Dm644 LICENSE $(DESTDIR)$(DATADIR)/licenses/isotab/LICENSE
 	@echo "  OK: Installed to $(PREFIX)/bin/$(TARGET)"
 	@echo "  OK: Desktop entry installed - search 'IsoTab' in your app launcher"
 
@@ -49,7 +51,7 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	rm -f $(DESTDIR)$(DATADIR)/applications/isotab.desktop
 	rm -f $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/isotab.svg
-	gtk-update-icon-cache -f -t $(DESTDIR)$(DATADIR)/icons/hicolor
+	@if [ -z "$(DESTDIR)" ]; then gtk-update-icon-cache -f -t $(DATADIR)/icons/hicolor; fi
 	@echo "  OK: Uninstalled"
 
 clean:
