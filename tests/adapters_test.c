@@ -9,7 +9,9 @@
 static void write_fixture(const char *path, const char *contents, gboolean executable)
 {
     g_assert_true(g_file_set_contents(path, contents, -1, NULL));
-    if (executable) g_assert_cmpint(chmod(path, 0700), ==, 0);
+    /* GLib versions differ in permission preservation on replacement. A
+     * fixture must stay private even with the VM user's default umask 0002. */
+    g_assert_cmpint(chmod(path, executable ? 0700 : 0600), ==, 0);
 }
 
 int main(void)
@@ -123,8 +125,9 @@ int main(void)
     Session *active = new_session("bc25827d-9d78-4b11-90ba-8b9f20b89b92", "Tor", tor);
     int root = ensure_profile_directory(active->profile_dir, &error);
     g_assert_no_error(error); close(root);
-    g_assert_true(prepare_browser_profile(tor, active->profile_dir, &error));
+    gboolean prepared = prepare_browser_profile(tor, active->profile_dir, &error);
     g_assert_no_error(error);
+    g_assert_true(prepared);
     char *prefs = g_build_filename(active->profile_dir, "user.js", NULL);
     char *contents = NULL;
     g_assert_true(g_file_get_contents(prefs, &contents, NULL, NULL));
@@ -132,7 +135,9 @@ int main(void)
     g_assert_nonnull(strstr(contents, active->profile_dir));
     char *custom = g_strconcat(contents, "// custom preference retained\n", NULL);
     write_fixture(prefs, custom, FALSE); g_free(custom); g_free(contents);
-    g_assert_true(prepare_browser_profile(tor, active->profile_dir, &error));
+    prepared = prepare_browser_profile(tor, active->profile_dir, &error);
+    g_assert_no_error(error);
+    g_assert_true(prepared);
     g_assert_true(g_file_get_contents(prefs, &contents, NULL, NULL));
     g_assert_nonnull(strstr(contents, "// custom preference retained")); g_free(contents);
     g_assert_true(validate_import_profile(active->profile_dir, tor, &error));
