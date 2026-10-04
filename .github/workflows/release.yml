@@ -127,7 +127,7 @@ jobs:
             cp /source/dist/*.AppImage /tmp/IsoTab.AppImage
             chmod +x /tmp/IsoTab.AppImage
             cd /tmp
-            ./IsoTab.AppImage --appimage-extract >/dev/null
+            runuser -u tester -- ./IsoTab.AppImage --appimage-extract >/dev/null
             runuser -u tester -- bash /source/packaging/smoke.sh /tmp/squashfs-root/AppRun
           '
   publish:
