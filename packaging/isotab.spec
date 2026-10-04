@@ -6,7 +6,7 @@ License:        GPL-3.0-only
 URL:            https://github.com/niko3x/isotab
 Source0:        isotab-%{version}.tar.gz
 BuildRequires:  gcc, make, pkgconfig(gtk+-3.0), pkgconfig(glib-2.0)
-Requires:       librsvg2
+Requires:       librsvg2, glib2 >= 2.66, gtk3 >= 3.24
 
 %description
 A native GTK3 session manager for installed browsers.
@@ -15,7 +15,7 @@ A native GTK3 session manager for installed browsers.
 %autosetup
 
 %build
-%make_build
+%make_build EXTRA_CFLAGS="-g"
 
 %install
 %make_install PREFIX=%{_prefix} DATADIR=%{_datadir}

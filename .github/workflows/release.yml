@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   deb-arch-appimage:
+    timeout-minutes: 25
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -36,6 +37,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
   rpm:
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -59,6 +61,7 @@ jobs:
           if-no-files-found: error
   install-test:
     needs: [deb-arch-appimage, rpm]
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -94,6 +97,7 @@ jobs:
   publish:
     needs: [install-test]
     if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -2,7 +2,7 @@
 # Run as a regular user inside a disposable container, never the real HOME.
 set -euo pipefail
 app=${1:-/usr/bin/isotab}
-"$app" --version
+timeout 20s "$app" --version
 fixture=$(mktemp -d)
 trap 'rm -rf -- "$fixture"' EXIT
 mkdir -m700 "$fixture/home"

@@ -15,7 +15,7 @@ API_FLAGS = -DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_66 \
 FORTIFY_LEVEL = $(shell $(CC) -E -P -x c ci/fortify-level.c)
 
 CFLAGS  = $(shell pkg-config --cflags gtk+-3.0) \
-          $(API_FLAGS) -DISOTAB_VERSION=\"$(VERSION)\" -O2 -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-protector-strong -fPIE -Wall -Wextra -Wno-unused-parameter
+          $(API_FLAGS) $(EXTRA_CFLAGS) -DISOTAB_VERSION=\"$(VERSION)\" -O2 -D_FORTIFY_SOURCE=$(FORTIFY_LEVEL) -fstack-protector-strong -fPIE -Wall -Wextra -Wno-unused-parameter
 LDFLAGS = $(shell pkg-config --libs   gtk+-3.0) -pie -Wl,-z,relro,-z,now,-z,noexecstack
 
 PREFIX  ?= /usr/local
@@ -48,6 +48,7 @@ install: $(TARGET)
 	@echo "  OK: Desktop entry installed - search 'IsoTab' in your app launcher"
 
 uninstall:
+	rm -f $(DESTDIR)$(DATADIR)/licenses/isotab/LICENSE
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	rm -f $(DESTDIR)$(DATADIR)/applications/isotab.desktop
 	rm -f $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/isotab.svg

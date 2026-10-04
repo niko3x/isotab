@@ -16,10 +16,10 @@ make install PREFIX=/usr DESTDIR="$stage"
 strip "$stage/usr/bin/isotab"
 mkdir -p "$stage/DEBIAN"
 # Resolve actual ELF requirements instead of guessing libc symbol versions.
-mkdir -p debian
-printf 'Source: isotab\nSection: utils\nPriority: optional\nMaintainer: niko3x <193813187+niko3x@users.noreply.github.com>\nStandards-Version: 4.6.0\n\nPackage: isotab\nArchitecture: amd64\nDescription: Browser session manager\n' > debian/control
-deps=$(dpkg-shlibdeps -O -e"$stage/usr/bin/isotab" | sed -n 's/^shlibs:Depends=//p')
-rm -rf debian
+mkdir -p "$stage/shlibs/debian"
+printf 'Source: isotab\nSection: utils\nPriority: optional\nMaintainer: niko3x <193813187+niko3x@users.noreply.github.com>\nStandards-Version: 4.6.0\n\nPackage: isotab\nArchitecture: amd64\nDescription: Browser session manager\n' > "$stage/shlibs/debian/control"
+deps=$(cd "$stage/shlibs"; dpkg-shlibdeps -O -e"$stage/usr/bin/isotab" | sed -n 's/^shlibs:Depends=//p')
+rm -rf "$stage/shlibs"
 cat > "$stage/DEBIAN/control" <<CONTROL
 Package: isotab
 Version: $version

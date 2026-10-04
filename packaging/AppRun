@@ -11,4 +11,4 @@ done
 export ISOTAB_APPIMAGE_ENV=1
 APPDIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 export APPDIR
-exec "$APPDIR/AppRun.wrapped" "$@"
+exec "$APPDIR/AppRun.hooks" "$@"
