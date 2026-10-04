@@ -29,11 +29,13 @@ printf '%s  %s\n' 156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec790
 mkdir -p sources notices
 for file in $(find AppDir/usr/lib -type f -name '*.so*' -printf '%f\n' | sort -u); do
     dpkg-query -S "*/$file" 2>/dev/null || true
-done | sed 's/: \/.*//' | sort -u > packages.txt
+done > owners.txt
+dpkg-query -S '/usr/share/glib-2.0/schemas/*' >> owners.txt 2>/dev/null || true
+sed 's/: \/.*//' owners.txt | sort -u > packages.txt
 while IFS= read -r package; do
     source=$(dpkg-query -W -f='${source:Package}=${source:Version}' "$package")
     printf '%s\n' "$source"
-    cp -a "/usr/share/doc/${package%%:*}/copyright" "notices/${package//:/_}.copyright" 2>/dev/null || true
+    cp -L "/usr/share/doc/${package%%:*}/copyright" "notices/${package//:/_}.copyright"
 done < packages.txt | sort -u > source-packages.txt
 (cd sources; while IFS= read -r package; do apt-get source --download-only "$package"; done < ../source-packages.txt)
 curl -fL --retry 3 https://github.com/AppImage/type2-runtime/archive/8f39b89e2ac31e1640b3d3f7e9a5108e6ce805fa.tar.gz -o sources/appimage-runtime.tar.gz

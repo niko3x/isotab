@@ -94,8 +94,44 @@ jobs:
             useradd -m tester
             runuser -u tester -- bash /source/packaging/smoke.sh
           '
+  appimage-portable:
+    needs: [deb-arch-appimage]
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04', 'fedora:latest']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: deb-arch-appimage
+          path: dist
+      - name: Run AppImage in a container without system GTK
+        env:
+          TEST_IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD:/source:ro" "$TEST_IMAGE" bash -euxc '
+            if command -v apt-get; then
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb xauth fontconfig dbus
+              ! dpkg-query -W libgtk-3-0
+            else
+              dnf install -y xorg-x11-server-Xvfb xorg-x11-xauth fontconfig dbus
+              ! rpm -q gtk3
+            fi
+            useradd -m tester
+            cp /source/dist/*.AppImage /tmp/IsoTab.AppImage
+            chmod +x /tmp/IsoTab.AppImage
+            cd /tmp
+            ./IsoTab.AppImage --appimage-extract >/dev/null
+            runuser -u tester -- bash /source/packaging/smoke.sh /tmp/squashfs-root/AppRun
+          '
   publish:
-    needs: [install-test]
+    needs: [install-test, appimage-portable]
     if: startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 20
     runs-on: ubuntu-24.04
