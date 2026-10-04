@@ -14,7 +14,23 @@ printf '%s  %s\n' 8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cd
 curl -fL --retry 3 https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh -o linuxdeploy-plugin-gtk.sh
 chmod +x linuxdeploy.AppImage linuxdeploy-plugin-gtk.sh
 export APPIMAGE_EXTRACT_AND_RUN=1 DEPLOY_GTK_VERSION=3
-./linuxdeploy.AppImage --appdir AppDir --plugin gtk
+# linuxdeploy excludes some libraries assumed to exist on a desktop (e.g.
+# FriBidi). Explicitly bundle the non-system dependencies of GTK and its
+# dynamically loaded modules, while leaving libc and graphics drivers native.
+libdir=$(pkg-config --variable=libdir gtk+-3.0)
+mapfile -t dependencies < <(
+    { printf '%s\0' "$OLDPWD/isotab";
+      find "$libdir/gtk-3.0" "$libdir/gdk-pixbuf-2.0" "$libdir/gio/modules" -type f -name '*.so' -print0;
+    } | xargs -0 ldd | awk '/=> \// {print $3}' | sort -u
+)
+libraries=()
+for library in "${dependencies[@]}"; do
+    case "${library##*/}" in
+        libc.so.*|libm.so.*|libmvec.so.*|libdl.so.*|libpthread.so.*|libresolv.so.*|librt.so.*|libanl.so.*|libnss_*.so.*|libutil.so.*|libthread_db.so.*|libgcc_s.so.*|libstdc++.so.*|libGL*.so.*|libEGL*.so.*|libOpenGL*.so.*|libdrm*.so.*|libgbm.so.*|libglapi.so.*) continue ;;
+    esac
+    libraries+=("--library=$library")
+done
+./linuxdeploy.AppImage --appdir AppDir --plugin gtk "${libraries[@]}"
 # Retain the generated launcher/hook runner, putting the host snapshot first.
 mv AppDir/AppRun AppDir/AppRun.hooks
 cp "$OLDPWD/packaging/AppRun" AppDir/AppRun
